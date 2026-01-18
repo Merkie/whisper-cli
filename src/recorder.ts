@@ -52,6 +52,7 @@ export async function record(verbose = false): Promise<RecordingResult> {
     let waveWidth = getWaveWidth();
     const waveBuffer: string[] = new Array(waveWidth).fill(" ");
     let currentDb = -60;
+    let cancelled = false;
 
     // Spawn FFmpeg with ebur128 filter to get volume levels
     const ffmpeg: ChildProcess = spawn(
@@ -136,11 +137,15 @@ export async function record(verbose = false): Promise<RecordingResult> {
       }
     });
 
-    // Listen for Enter or Ctrl+C to stop recording
+    // Listen for Enter to stop, Ctrl+C to cancel
     const onKeypress = (data: Buffer) => {
       const key = data.toString();
-      if (key.includes("\n") || key.includes("\r") || key.includes("\x03")) {
+      const isEnter = key.includes("\n") || key.includes("\r");
+      const isCtrlC = key.includes("\x03");
+
+      if (isEnter || isCtrlC) {
         stopped = true;
+        cancelled = isCtrlC;
         clearInterval(timer);
         clearInterval(waveTimer);
         process.stdin.removeListener("data", onKeypress);
@@ -169,7 +174,13 @@ export async function record(verbose = false): Promise<RecordingResult> {
         process.stdout.write("\x1b[2K\n\x1b[2K\x1b[A\r"); // Clear both lines
       }
 
-      if (stopped || code === 0 || code === 255) {
+      if (cancelled) {
+        // User pressed Ctrl+C - clean up and reject
+        if (fs.existsSync(wavPath)) {
+          fs.unlinkSync(wavPath);
+        }
+        reject(new Error("cancelled"));
+      } else if (stopped || code === 0 || code === 255) {
         // FFmpeg returns 255 when interrupted with SIGINT
         if (fs.existsSync(wavPath)) {
           if (verbose) {

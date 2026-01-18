@@ -112,6 +112,10 @@ async function main() {
     }
   } catch (error) {
     clearStatus();
+    // Silent exit on user cancel
+    if (error instanceof Error && error.message === "cancelled") {
+      process.exit(0);
+    }
     console.error(chalk.red(`Recording error: ${error}`));
     process.exit(1);
   }
