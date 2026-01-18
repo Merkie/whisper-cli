@@ -1,0 +1,16 @@
+{
+  "description": "whspr voice transcription integration - automatically updates WHSPR.md with project context",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/update-whspr.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
