@@ -8,7 +8,86 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const verbose = process.argv.includes("--verbose") || process.argv.includes("-v");
+// Default prompts (can be overridden in settings.json)
+export const DEFAULTS = {
+  transcriptionModel: "whisper-large-v3-turbo" as const,
+  language: "en",
+  systemPrompt:
+    'Your task is to clean up/fix transcribed text generated from mic input by the user according to the user\'s own prompt, this prompt may contain custom vocabulary, instructions, etc. Please return the user\'s transcription with the fixes made (e.g. the AI might hear "PostgreSQL" as "post crest QL" you need to use your own reasoning to fix these mistakes in the transcription)',
+  customPromptPrefix: "Here's my custom user prompt:",
+  transcriptionPrefix: "Here's my raw transcription output that I need you to edit:",
+};
+
+// Settings interface
+export interface WhsprSettings {
+  verbose?: boolean;
+  suffix?: string; // Appended to all transcriptions (e.g., "\n\n(Transcribed via Whisper)")
+  transcriptionModel?: "whisper-large-v3" | "whisper-large-v3-turbo";
+  language?: string; // ISO 639-1 language code (e.g., "en", "zh", "es")
+  systemPrompt?: string; // System prompt for post-processing
+  customPromptPrefix?: string; // Prefix before custom prompt content
+  transcriptionPrefix?: string; // Prefix before raw transcription
+}
+
+const WHSPR_DIR = path.join(os.homedir(), ".whspr");
+const SETTINGS_PATH = path.join(WHSPR_DIR, "settings.json");
+
+function loadSettings(): WhsprSettings {
+  try {
+    if (fs.existsSync(SETTINGS_PATH)) {
+      const content = fs.readFileSync(SETTINGS_PATH, "utf-8");
+      return JSON.parse(content) as WhsprSettings;
+    }
+  } catch (error) {
+    // Silently ignore invalid settings file
+  }
+  return {};
+}
+
+function loadCustomPrompt(verbose: boolean): { prompt: string | null; sources: string[] } {
+  const sources: string[] = [];
+  let globalPrompt: string | null = null;
+  let localPrompt: string | null = null;
+
+  // Check for global WHSPR.md or WHISPER.md in ~/.whspr/
+  const globalWhsprPath = path.join(WHSPR_DIR, "WHSPR.md");
+  const globalWhisperPath = path.join(WHSPR_DIR, "WHISPER.md");
+
+  if (fs.existsSync(globalWhsprPath)) {
+    globalPrompt = fs.readFileSync(globalWhsprPath, "utf-8");
+    sources.push("~/.whspr/WHSPR.md");
+  } else if (fs.existsSync(globalWhisperPath)) {
+    globalPrompt = fs.readFileSync(globalWhisperPath, "utf-8");
+    sources.push("~/.whspr/WHISPER.md");
+  }
+
+  // Check for local WHSPR.md or WHISPER.md in current directory
+  const localWhsprPath = path.join(process.cwd(), "WHSPR.md");
+  const localWhisperPath = path.join(process.cwd(), "WHISPER.md");
+
+  if (fs.existsSync(localWhsprPath)) {
+    localPrompt = fs.readFileSync(localWhsprPath, "utf-8");
+    sources.push("./WHSPR.md");
+  } else if (fs.existsSync(localWhisperPath)) {
+    localPrompt = fs.readFileSync(localWhisperPath, "utf-8");
+    sources.push("./WHISPER.md");
+  }
+
+  // Combine prompts: global first, then local
+  let combinedPrompt: string | null = null;
+  if (globalPrompt && localPrompt) {
+    combinedPrompt = globalPrompt + "\n\n" + localPrompt;
+  } else if (globalPrompt) {
+    combinedPrompt = globalPrompt;
+  } else if (localPrompt) {
+    combinedPrompt = localPrompt;
+  }
+
+  return { prompt: combinedPrompt, sources };
+}
+
+const settings = loadSettings();
+const verbose = settings.verbose || process.argv.includes("--verbose") || process.argv.includes("-v");
 
 function status(message: string) {
   process.stdout.write(`\x1b[2K\r${chalk.blue(message)}`);
@@ -48,36 +127,38 @@ async function main() {
     try {
       // 3. Transcribe with Whisper
       status("Transcribing...");
-      const rawText = await transcribe(mp3Path);
+      const rawText = await transcribe(
+        mp3Path,
+        settings.transcriptionModel ?? DEFAULTS.transcriptionModel,
+        settings.language ?? DEFAULTS.language
+      );
 
       if (verbose) {
         clearStatus();
         console.log(chalk.gray(`Raw: ${rawText}`));
       }
 
-      // 4. Read WHSPR.md or WHISPER.md if exists
-      const whsprMdPath = path.join(process.cwd(), "WHSPR.md");
-      const whisperMdPath = path.join(process.cwd(), "WHISPER.md");
-      let customPrompt: string | null = null;
-      let vocabFile: string | null = null;
-
-      if (fs.existsSync(whsprMdPath)) {
-        customPrompt = fs.readFileSync(whsprMdPath, "utf-8");
-        vocabFile = "WHSPR.md";
-      } else if (fs.existsSync(whisperMdPath)) {
-        customPrompt = fs.readFileSync(whisperMdPath, "utf-8");
-        vocabFile = "WHISPER.md";
-      }
+      // 4. Read WHSPR.md or WHISPER.md (global from ~/.whspr/ and/or local)
+      const { prompt: customPrompt, sources: vocabSources } = loadCustomPrompt(verbose);
 
       if (customPrompt && verbose) {
-        console.log(chalk.gray(`Using custom vocabulary from ${vocabFile}`));
+        console.log(chalk.gray(`Using custom vocabulary from: ${vocabSources.join(" + ")}`));
       }
 
       // 5. Post-process
       status("Post-processing...");
-      const fixedText = await postprocess(rawText, customPrompt);
+      let fixedText = await postprocess(rawText, customPrompt, {
+        systemPrompt: settings.systemPrompt ?? DEFAULTS.systemPrompt,
+        customPromptPrefix: settings.customPromptPrefix ?? DEFAULTS.customPromptPrefix,
+        transcriptionPrefix: settings.transcriptionPrefix ?? DEFAULTS.transcriptionPrefix,
+      });
 
-      // 6. Output and copy
+      // 6. Apply suffix if configured
+      if (settings.suffix) {
+        fixedText = fixedText + settings.suffix;
+      }
+
+      // 7. Output and copy
       clearStatus();
       const processTime = ((Date.now() - processStart) / 1000).toFixed(1);
       const wordCount = fixedText.trim().split(/\s+/).filter(w => w.length > 0).length;
@@ -113,7 +194,7 @@ async function main() {
       await copyToClipboard(fixedText);
       console.log(chalk.green("✓") + chalk.gray(" Copied to clipboard"));
 
-      // 7. Clean up
+      // 8. Clean up
       fs.unlinkSync(mp3Path);
     } catch (error) {
       clearStatus();
