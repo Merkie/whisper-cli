@@ -51,20 +51,64 @@ Press **Enter** to stop recording.
 - 15-minute max recording time
 - Transcription via Groq Whisper API
 - AI-powered post-processing to fix transcription errors
-- Custom vocabulary support via `WHSPR.md`
+- Custom vocabulary support via `WHSPR.md` (global and local)
+- Configurable settings via `~/.whspr/settings.json`
 - Automatic clipboard copy
+
+## Settings
+
+Create `~/.whspr/settings.json` to customize whspr's behavior:
+
+```json
+{
+  "verbose": false,
+  "suffix": "\n\n(Transcribed via Whisper)",
+  "transcriptionModel": "whisper-large-v3-turbo",
+  "language": "en",
+  "systemPrompt": "Your task is to clean up transcribed text...",
+  "customPromptPrefix": "Here's my custom user prompt:",
+  "transcriptionPrefix": "Here's my raw transcription output:"
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `verbose` | boolean | `false` | Enable verbose output |
+| `suffix` | string | none | Text appended to all transcriptions |
+| `transcriptionModel` | string | `"whisper-large-v3-turbo"` | Whisper model (`"whisper-large-v3"` or `"whisper-large-v3-turbo"`) |
+| `language` | string | `"en"` | ISO 639-1 language code (e.g., `"en"`, `"zh"`, `"es"`) |
+| `systemPrompt` | string | (built-in) | System prompt for AI post-processing |
+| `customPromptPrefix` | string | `"Here's my custom user prompt:"` | Prefix before custom prompt content |
+| `transcriptionPrefix` | string | `"Here's my raw transcription output that I need you to edit:"` | Prefix before raw transcription |
 
 ## Custom Vocabulary
 
-Create a `WHSPR.md` (or `WHISPER.md`) file in your current directory to provide custom vocabulary, names, or instructions for the AI post-processor:
+Create a `WHSPR.md` (or `WHISPER.md`) file to provide custom vocabulary, names, or instructions for the AI post-processor.
+
+### Global Prompts
+
+Place in `~/.whspr/WHSPR.md` for vocabulary that applies everywhere:
 
 ```markdown
-# Custom Vocabulary
+# Global Vocabulary
+
+- My name is "Alex" not "Alec"
+- Common terms: API, CLI, JSON, OAuth
+```
+
+### Local Prompts
+
+Place in your current directory (`./WHSPR.md`) for project-specific vocabulary:
+
+```markdown
+# Project Vocabulary
 
 - PostgreSQL (not "post crest QL")
 - Kubernetes (not "cooper netties")
 - My colleague's name is "Priya" not "Maria"
 ```
+
+When both exist, they are combined (global first, then local).
 
 ## How It Works
 
@@ -72,9 +116,10 @@ Create a `WHSPR.md` (or `WHISPER.md`) file in your current directory to provide 
 2. Displays a live waveform visualization based on audio levels
 3. Converts the recording to MP3
 4. Sends audio to Groq's Whisper API for transcription
-5. Reads `WHSPR.md` from current directory (if exists)
+5. Loads custom prompts from `~/.whspr/WHSPR.md` and/or `./WHSPR.md`
 6. Sends transcription + custom vocabulary to AI for post-processing
-7. Prints result and copies to clipboard
+7. Applies suffix (if configured)
+8. Prints result and copies to clipboard
 
 If transcription fails, the recording is saved to `~/.whspr/recordings/` for manual recovery.
 
