@@ -136,9 +136,10 @@ export async function record(verbose = false): Promise<RecordingResult> {
       }
     });
 
-    // Listen for Enter key to stop recording
+    // Listen for Enter or Ctrl+C to stop recording
     const onKeypress = (data: Buffer) => {
-      if (data.toString().includes("\n") || data.toString().includes("\r")) {
+      const key = data.toString();
+      if (key.includes("\n") || key.includes("\r") || key.includes("\x03")) {
         stopped = true;
         clearInterval(timer);
         clearInterval(waveTimer);
