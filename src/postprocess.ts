@@ -1,4 +1,4 @@
-import { generateObject } from "ai";
+import { generateText, Output } from "ai";
 import { z } from "zod";
 import { withRetry } from "./utils/retry.js";
 import { getProvider, ProviderType } from "./utils/providers.js";
@@ -20,14 +20,22 @@ export async function postprocess(
   customPrompt: string | null,
   options: PostprocessOptions,
 ): Promise<string> {
-  const { provider, modelName, systemPrompt, customPromptPrefix, transcriptionPrefix } = options;
+  const {
+    provider,
+    modelName,
+    systemPrompt,
+    customPromptPrefix,
+    transcriptionPrefix,
+  } = options;
   const providerInstance = getProvider(provider);
 
   const result = await withRetry(
     async () => {
-      const response = await generateObject({
+      const response = await generateText({
         model: providerInstance(modelName),
-        schema: outputSchema,
+        output: Output.object({
+          schema: outputSchema,
+        }),
         messages: [
           {
             role: "system",
@@ -47,7 +55,7 @@ export async function postprocess(
           },
         ],
       });
-      return response.object;
+      return response.output;
     },
     3,
     "postprocess",
