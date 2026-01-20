@@ -47,7 +47,7 @@ export async function record(verbose = false): Promise<RecordingResult> {
   return new Promise((resolve, reject) => {
     // Initialize waveform buffer
     let waveWidth = getWaveWidth();
-    const waveBuffer: string[] = new Array(waveWidth).fill(" ");
+    const waveBuffer: string[] = new Array(waveWidth).fill(WAVE_CHARS[0]);
     let currentDb = -60;
     let cancelled = false;
 
