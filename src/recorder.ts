@@ -52,19 +52,29 @@ export async function record(verbose = false): Promise<RecordingResult> {
     let cancelled = false;
 
     // Spawn FFmpeg with ebur128 filter to get volume levels
+    // Use asplit to duplicate audio: one copy for analysis (ebur128 -> null), one clean copy to file
     const ffmpeg: ChildProcess = spawn(
       "ffmpeg",
       [
         "-f",
         "avfoundation",
+        "-thread_queue_size",
+        "1024",
         "-i",
         ":0",
-        "-af",
-        "ebur128=peak=true",
+        "-filter_complex",
+        "[0:a]asplit=2[meter][out];[meter]ebur128=peak=true[null]",
+        "-map",
+        "[out]",
         "-t",
         MAX_DURATION_SECONDS.toString(),
         "-y",
         wavPath,
+        "-map",
+        "[null]",
+        "-f",
+        "null",
+        "-",
       ],
       {
         stdio: ["pipe", "pipe", "pipe"],
