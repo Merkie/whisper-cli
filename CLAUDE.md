@@ -16,7 +16,7 @@ A CLI tool that records audio from your microphone, transcribes it using Groq's 
   - `recorder.ts` - FFmpeg audio recording with waveform TUI
   - `transcribe.ts` - Groq Whisper API integration
   - `postprocess.ts` - AI post-processing for corrections
-  - `utils/` - Shared utilities (retry, clipboard, groq client)
+  - `utils/` - Shared utilities (retry, clipboard, providers)
 - `bin/whspr.js` - CLI entrypoint
 - `dist/` - Compiled output
 
@@ -42,20 +42,24 @@ whspr --verbose
 
 ## Environment
 
-Requires `GROQ_API_KEY` environment variable.
+- `GROQ_API_KEY` - Required for Whisper transcription
+- `ANTHROPIC_API_KEY` - Required when using Anthropic models for post-processing
 
 ## Key Conventions
 
-- Uses Groq SDK for both Whisper transcription and AI post-processing
+- Uses Groq Whisper API for transcription
+- Post-processing supports multiple providers via `provider:model-name` format (e.g., `groq:openai/gpt-oss-120b`, `anthropic:claude-sonnet-4-5`)
+- Uses Vercel AI SDK (`ai` package) for unified provider interface
 - Recording uses FFmpeg's avfoundation (macOS) with ebur128 for volume levels
 - Max recording duration: 15 minutes
 - Failed recordings are saved to `~/.whspr/recordings/` for recovery
-- Custom vocabulary via `WHSPR.md` in current directory
+- Custom vocabulary via `WHSPR.md` in current directory (global in `~/.whspr/` and/or local)
+- Settings stored in `~/.whspr/settings.json`
 
 ## API Flow
 
 1. Record audio → WAV file (FFmpeg)
 2. Convert WAV → MP3
 3. Transcribe MP3 → text (Groq Whisper)
-4. Post-process text → fixed text (Groq AI)
+4. Post-process text → fixed text (configurable provider: Groq or Anthropic)
 5. Copy result to clipboard

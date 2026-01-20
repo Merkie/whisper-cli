@@ -28,13 +28,15 @@ alias whisper="whspr"
 
 - Node.js 18+
 - FFmpeg (`brew install ffmpeg` on macOS)
-- Groq API key
+- Groq API key (required for Whisper transcription)
+- Anthropic API key (optional, for Anthropic post-processing models)
 
 ## Usage
 
 ```bash
-# Set your API key
+# Set your API keys
 export GROQ_API_KEY="your-api-key"
+export ANTHROPIC_API_KEY="your-api-key"  # Optional, for Anthropic models
 
 # Run the tool
 whspr
@@ -65,6 +67,7 @@ Create `~/.whspr/settings.json` to customize whspr's behavior:
   "suffix": "\n\n(Transcribed via Whisper)",
   "transcriptionModel": "whisper-large-v3-turbo",
   "language": "en",
+  "model": "groq:openai/gpt-oss-120b",
   "systemPrompt": "Your task is to clean up transcribed text...",
   "customPromptPrefix": "Here's my custom user prompt:",
   "transcriptionPrefix": "Here's my raw transcription output:"
@@ -77,9 +80,41 @@ Create `~/.whspr/settings.json` to customize whspr's behavior:
 | `suffix` | string | none | Text appended to all transcriptions |
 | `transcriptionModel` | string | `"whisper-large-v3-turbo"` | Whisper model (`"whisper-large-v3"` or `"whisper-large-v3-turbo"`) |
 | `language` | string | `"en"` | ISO 639-1 language code (e.g., `"en"`, `"zh"`, `"es"`) |
+| `model` | string | `"groq:openai/gpt-oss-120b"` | Post-processing model in `provider:model-name` format (see below) |
 | `systemPrompt` | string | (built-in) | System prompt for AI post-processing |
 | `customPromptPrefix` | string | `"Here's my custom user prompt:"` | Prefix before custom prompt content |
 | `transcriptionPrefix` | string | `"Here's my raw transcription output that I need you to edit:"` | Prefix before raw transcription |
+
+### Supported Providers
+
+The `model` setting uses a `provider:model-name` format. Supported providers:
+
+| Provider | API Key Required |
+|----------|------------------|
+| `groq` | `GROQ_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+
+### Common Models
+
+| Provider | Model | Description |
+|----------|-------|-------------|
+| `anthropic` | `claude-sonnet-4-5` | Balanced speed and quality (recommended) |
+| `anthropic` | `claude-haiku-4-5` | Fastest responses, smaller model |
+| `anthropic` | `claude-opus-4-5` | Best quality, slower and more expensive |
+| `groq` | `openai/gpt-oss-120b` | Default model |
+| `groq` | `llama-3.3-70b-versatile` | Fast, versatile Llama model |
+| `groq` | `moonshotai/kimi-k2-instruct-0905` | Moonshot Kimi model |
+
+> **Note:** Model names are set by the providers and may change at any time. Check [Groq Models](https://console.groq.com/docs/models) and [Anthropic Models](https://docs.anthropic.com/en/docs/about-claude/models) for the latest available models.
+
+### Example: Using Claude with Custom Suffix
+
+```json
+{
+  "model": "anthropic:claude-sonnet-4-5",
+  "suffix": "\n\n(Transcribed via Whisper, edited via Claude Sonnet 4.5)"
+}
+```
 
 ## Custom Vocabulary
 
