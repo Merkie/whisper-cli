@@ -1,6 +1,7 @@
 import { streamText } from "ai";
 import { withRetry } from "./utils/retry.js";
 import { getProvider, ProviderType } from "./utils/providers.js";
+import type { UsageInfo } from "./utils/pricing.js";
 
 export interface PostprocessOptions {
   provider: ProviderType;
@@ -11,11 +12,16 @@ export interface PostprocessOptions {
   onProgress?: (progress: number) => void;
 }
 
+export interface PostprocessResult {
+  text: string;
+  usage?: UsageInfo;
+}
+
 export async function postprocess(
   rawTranscription: string,
   customPrompt: string | null,
   options: PostprocessOptions,
-): Promise<string> {
+): Promise<PostprocessResult> {
   const {
     provider,
     modelName,
@@ -61,7 +67,13 @@ export async function postprocess(
         }
       }
 
-      return accumulated.trim();
+      // Capture usage info after stream completes
+      const usage = await textStream.usage;
+      const usageInfo: UsageInfo | undefined = usage?.inputTokens !== undefined && usage?.outputTokens !== undefined
+        ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }
+        : undefined;
+
+      return { text: accumulated.trim(), usage: usageInfo };
     },
     3,
     "postprocess",

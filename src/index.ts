@@ -3,7 +3,8 @@ import { record, convertToMp3, RecordingResult } from "./recorder.js";
 import { transcribe } from "./transcribe.js";
 import { postprocess } from "./postprocess.js";
 import { copyToClipboard } from "./utils/clipboard.js";
-import chalk from "chalk";
+import { calculateCost, formatCost } from "./utils/pricing.js";
+import { renderStartupHeader, formatCompactStats, formatStatus, colors, BOX } from "./ui.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -124,7 +125,7 @@ const settings = loadSettings();
 const verbose = settings.verbose || process.argv.includes("--verbose") || process.argv.includes("-v");
 
 function status(message: string) {
-  process.stdout.write(`\x1b[2K\r${chalk.blue(message)}`);
+  process.stdout.write(`\x1b[2K\r${formatStatus(message)}`);
 }
 
 function clearStatus() {
@@ -148,19 +149,28 @@ async function main() {
   // Check for required API keys before recording
   // Always need GROQ_API_KEY for Whisper transcription
   if (!process.env.GROQ_API_KEY) {
-    console.error(chalk.red("Error: GROQ_API_KEY environment variable is not set"));
-    console.log(chalk.gray("Get your API key at https://console.groq.com/keys"));
-    console.log(chalk.gray("Then run: export GROQ_API_KEY=\"your-api-key\""));
+    console.error(colors.error("Error: GROQ_API_KEY environment variable is not set"));
+    console.log(colors.metadata("Get your API key at https://console.groq.com/keys"));
+    console.log(colors.metadata("Then run: export GROQ_API_KEY=\"your-api-key\""));
     process.exit(1);
   }
 
   // Check for provider-specific API key for post-processing
   if (provider === "anthropic" && !process.env.ANTHROPIC_API_KEY) {
-    console.error(chalk.red("Error: ANTHROPIC_API_KEY environment variable is not set"));
-    console.log(chalk.gray("Get your API key at https://console.anthropic.com/settings/keys"));
-    console.log(chalk.gray("Then run: export ANTHROPIC_API_KEY=\"your-api-key\""));
+    console.error(colors.error("Error: ANTHROPIC_API_KEY environment variable is not set"));
+    console.log(colors.metadata("Get your API key at https://console.anthropic.com/settings/keys"));
+    console.log(colors.metadata("Then run: export ANTHROPIC_API_KEY=\"your-api-key\""));
     process.exit(1);
   }
+
+  // Load custom prompt early to show in startup header
+  const { prompt: customPrompt, sources: vocabSources } = loadCustomPrompt(verbose);
+
+  // Display startup header
+  renderStartupHeader({
+    model: modelConfig,
+    vocabSources,
+  });
 
   try {
     // 1. Record audio
@@ -182,19 +192,15 @@ async function main() {
 
       if (verbose) {
         clearStatus();
-        console.log(chalk.gray(`Raw: ${rawText}`));
+        console.log(colors.metadata(`Raw: ${rawText}`));
+        if (customPrompt) {
+          console.log(colors.metadata(`Using custom vocabulary from: ${vocabSources.join(" + ")}`));
+        }
       }
 
-      // 4. Read WHSPR.md or WHISPER.md (global from ~/.whspr/ and/or local)
-      const { prompt: customPrompt, sources: vocabSources } = loadCustomPrompt(verbose);
-
-      if (customPrompt && verbose) {
-        console.log(chalk.gray(`Using custom vocabulary from: ${vocabSources.join(" + ")}`));
-      }
-
-      // 5. Post-process with progress bar
+      // 4. Post-process with progress bar
       status("Post-processing... 0%");
-      let fixedText = await postprocess(rawText, customPrompt, {
+      const postprocessResult = await postprocess(rawText, customPrompt, {
         provider,
         modelName,
         systemPrompt: settings.systemPrompt ?? DEFAULTS.systemPrompt,
@@ -203,33 +209,36 @@ async function main() {
         onProgress: (progress) => {
           const barWidth = 20;
           const filled = Math.round((progress / 100) * barWidth);
-          const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
+          const bar = "\u2588".repeat(filled) + "\u2591".repeat(barWidth - filled);
           status(`Post-processing... [${bar}] ${progress}%`);
         },
       });
 
-      // 6. Apply suffix if configured
+      let fixedText = postprocessResult.text;
+
+      // 5. Apply suffix if configured
       if (settings.suffix) {
         fixedText = fixedText + settings.suffix;
       }
 
-      // 7. Output and copy
+      // 6. Output and copy
       clearStatus();
       const processTime = ((Date.now() - processStart) / 1000).toFixed(1);
       const wordCount = fixedText.trim().split(/\s+/).filter(w => w.length > 0).length;
       const charCount = fixedText.length;
 
-      // Log stats
-      console.log(
-        chalk.dim("Audio: ") + chalk.white(formatDuration(recording.durationSeconds)) +
-        chalk.dim(" • Processing: ") + chalk.white(processTime + "s")
-      );
+      // Calculate cost if usage info is available
+      let costString: string | undefined;
+      if (postprocessResult.usage) {
+        const cost = calculateCost(modelName, postprocessResult.usage);
+        costString = formatCost(cost);
+      }
 
       // Draw box
       const termWidth = Math.min(process.stdout.columns || 60, 80);
       const lineWidth = termWidth - 2;
       const label = " TRANSCRIPT ";
-      console.log(chalk.dim("┌─") + chalk.cyan(label) + chalk.dim("─".repeat(lineWidth - label.length - 1) + "┐"));
+      console.log(colors.dim(BOX.topLeft + BOX.horizontal) + colors.header.bold(label) + colors.dim(BOX.horizontal.repeat(lineWidth - label.length - 1) + BOX.topRight));
       const lines = fixedText.split("\n");
       for (const line of lines) {
         // Wrap long lines
@@ -237,19 +246,24 @@ async function main() {
         while (remaining.length > 0) {
           const chunk = remaining.slice(0, lineWidth - 2);
           remaining = remaining.slice(lineWidth - 2);
-          console.log(chalk.dim("│ ") + chalk.white(chunk.padEnd(lineWidth - 2)) + chalk.dim(" │"));
+          console.log(colors.dim(BOX.vertical + " ") + colors.white(chunk.padEnd(lineWidth - 2)) + colors.dim(" " + BOX.vertical));
         }
         if (line.length === 0) {
-          console.log(chalk.dim("│ " + " ".repeat(lineWidth - 2) + " │"));
+          console.log(colors.dim(BOX.vertical + " " + " ".repeat(lineWidth - 2) + " " + BOX.vertical));
         }
       }
-      const stats = ` ${wordCount} words • ${charCount} chars `;
-      const bottomLine = "─".repeat(lineWidth - stats.length - 1) + " ";
-      console.log(chalk.dim("└" + bottomLine) + chalk.dim(stats) + chalk.dim("┘"));
+      const stats = ` ${wordCount} words \u2022 ${charCount} chars `;
+      const bottomLine = BOX.horizontal.repeat(lineWidth - stats.length - 1) + " ";
+      console.log(colors.dim(BOX.bottomLeft + bottomLine) + colors.metadata(stats) + colors.dim(BOX.bottomRight));
       await copyToClipboard(fixedText);
-      console.log(chalk.green("✓") + chalk.gray(" Copied to clipboard"));
+      console.log(formatCompactStats({
+        audioDuration: formatDuration(recording.durationSeconds),
+        processingTime: processTime + "s",
+        cost: costString,
+      }));
+      console.log(colors.success("\u2713") + colors.metadata(" Copied to clipboard"));
 
-      // 8. Clean up
+      // 7. Clean up
       fs.unlinkSync(mp3Path);
     } catch (error) {
       clearStatus();
@@ -258,8 +272,8 @@ async function main() {
       fs.mkdirSync(backupDir, { recursive: true });
       const backupPath = path.join(backupDir, `recording-${Date.now()}.mp3`);
       fs.renameSync(mp3Path, backupPath);
-      console.error(chalk.red(`Error: ${error}`));
-      console.log(chalk.yellow(`Recording saved to: ${backupPath}`));
+      console.error(colors.error(`Error: ${error}`));
+      console.log(colors.info(`Recording saved to: ${backupPath}`));
       process.exit(1);
     }
   } catch (error) {
@@ -268,7 +282,7 @@ async function main() {
     if (error instanceof Error && error.message === "cancelled") {
       process.exit(0);
     }
-    console.error(chalk.red(`Recording error: ${error}`));
+    console.error(colors.error(`Recording error: ${error}`));
     process.exit(1);
   }
 }
